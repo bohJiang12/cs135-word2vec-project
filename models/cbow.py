@@ -1,12 +1,13 @@
 import sys
 import os
+import time  # For tracking training time
 import numpy as np
 import torch
 import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import DataLoader, Dataset
-from tqdm import tqdm  # For progress bars
-import matplotlib.pyplot as plt  # For plotting loss
+from tqdm import tqdm
+import matplotlib.pyplot as plt
 from datasets import load_dataset
 
 # Ensure imports work correctly
@@ -68,6 +69,7 @@ def train_cbow_model(model, data_loader, num_epochs, learning_rate=0.01, device=
     optimizer = optim.SGD(model.parameters(), lr=learning_rate)
 
     losses = []  # List to track losses for each epoch
+    start_time = time.time()  # Start tracking time
 
     for epoch in range(num_epochs):
         total_loss = 0
@@ -88,6 +90,10 @@ def train_cbow_model(model, data_loader, num_epochs, learning_rate=0.01, device=
         avg_loss = total_loss / len(data_loader)
         losses.append(avg_loss)  # Track the average loss for this epoch
         print(f"Epoch {epoch + 1}, Average Loss: {avg_loss}")
+
+    end_time = time.time()  # End tracking time
+    total_training_time = end_time - start_time
+    print(f"Total training time: {total_training_time:.2f} seconds")
 
     # Save and plot training loss
     os.makedirs("loss_plots", exist_ok=True)
@@ -125,7 +131,7 @@ if __name__ == "__main__":
     tokenized_data = [vocab.encode(sentence) for sentence in tqdm(preprocessed_data, desc="Tokenizing data")]
 
     # Generate CBOW data
-    window_size = 2
+    window_size = 5
     cbow_data = generate_cbow_data(tokenized_data, window_size)
 
     # Prepare DataLoader
@@ -134,7 +140,7 @@ if __name__ == "__main__":
 
     # Initialize and train CBOW model
     embedding_dim = 100
-    num_epochs = 50
+    num_epochs = 5
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Using device: {device}")
     model = CBOWModel(vocab_size=len(vocab), embedding_dim=embedding_dim).to(device)
