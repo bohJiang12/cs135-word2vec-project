@@ -5,6 +5,7 @@ import torch.optim as optim
 from torch.utils.data import DataLoader, Dataset
 from datasets import load_dataset
 from tqdm import tqdm  # For progress bars
+import matplotlib.pyplot as plt  # For plotting loss
 
 # Ensure imports work correctly
 sys.path.append('../data')
@@ -56,6 +57,8 @@ def train_cbow_model(model, data_loader, num_epochs=5, learning_rate=0.01):
     criterion = nn.CrossEntropyLoss()
     optimizer = optim.SGD(model.parameters(), lr=learning_rate)
 
+    losses = []  # List to track losses for each epoch
+
     for epoch in range(num_epochs):
         total_loss = 0
         with tqdm(data_loader, desc=f"Epoch {epoch + 1}/{num_epochs}", unit="batch") as pbar:
@@ -68,7 +71,16 @@ def train_cbow_model(model, data_loader, num_epochs=5, learning_rate=0.01):
 
                 total_loss += loss.item()
                 pbar.set_postfix(loss=loss.item())
-        print(f"Epoch {epoch + 1}, Average Loss: {total_loss / len(data_loader)}")
+        avg_loss = total_loss / len(data_loader)
+        losses.append(avg_loss)  # Track the average loss for this epoch
+        print(f"Epoch {epoch + 1}, Average Loss: {avg_loss}")
+
+    # Plot the training loss
+    plt.plot(range(1, num_epochs + 1), losses, marker='o')
+    plt.xlabel("Epoch")
+    plt.ylabel("Average Loss")
+    plt.title("Training Loss Over Epochs")
+    plt.show()
 
 
 if __name__ == "__main__":
