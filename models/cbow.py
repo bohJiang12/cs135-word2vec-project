@@ -1,15 +1,20 @@
 import sys
+import os
+import numpy as np
 import torch
 import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import DataLoader, Dataset
-from datasets import load_dataset
 from tqdm import tqdm  # For progress bars
 import matplotlib.pyplot as plt  # For plotting loss
+from datasets import load_dataset
 
 # Ensure imports work correctly
 sys.path.append('../data')
 from download_and_preprocess import preprocess, Vocabulary
+
+# Set Hugging Face cache directory
+os.environ["HF_DATASETS_CACHE"] = "/home/egk265/huggingface"
 
 
 class CBOWModel(nn.Module):
@@ -53,7 +58,12 @@ def prepare_dataloader(cbow_data, batch_size):
     return data_loader
 
 
-def train_cbow_model(model, data_loader, num_epochs=5, learning_rate=0.01):
+def cosine_similarity(vec1, vec2):
+    """Compute cosine similarity between two vectors."""
+    return np.dot(vec1, vec2) / (np.linalg.norm(vec1) * np.linalg.norm(vec2))
+
+
+def train_cbow_model(model, data_loader, num_epochs, learning_rate=0.01, device=torch.device("cpu")):
     criterion = nn.CrossEntropyLoss()
     optimizer = optim.SGD(model.parameters(), lr=learning_rate)
 
@@ -63,6 +73,10 @@ def train_cbow_model(model, data_loader, num_epochs=5, learning_rate=0.01):
         total_loss = 0
         with tqdm(data_loader, desc=f"Epoch {epoch + 1}/{num_epochs}", unit="batch") as pbar:
             for context, target in pbar:
+                # Move data to the GPU
+                context = context.to(device)
+                target = target.to(device)
+
                 optimizer.zero_grad()
                 output = model(context)
                 loss = criterion(output, target)
@@ -75,18 +89,24 @@ def train_cbow_model(model, data_loader, num_epochs=5, learning_rate=0.01):
         losses.append(avg_loss)  # Track the average loss for this epoch
         print(f"Epoch {epoch + 1}, Average Loss: {avg_loss}")
 
-    # Plot the training loss
+    # Save and plot training loss
+    os.makedirs("loss_plots", exist_ok=True)
     plt.plot(range(1, num_epochs + 1), losses, marker='o')
     plt.xlabel("Epoch")
     plt.ylabel("Average Loss")
     plt.title("Training Loss Over Epochs")
-    plt.show()
+    plt.savefig("loss_plots/training_loss.png")
+    plt.close()
+
+    return model
 
 
 if __name__ == "__main__":
     # Load the dataset
-    dataset = load_dataset("wikitext", "wikitext-103-v1")
-    train_data = dataset["train"]
+    dataset = load_dataset("wikitext", "wikitext-103-v1", cache_dir="/home/egk265/huggingface")
+    subset_fraction = 0.01  # Use a subset of the dataset for testing
+    train_data = dataset["train"].shuffle(seed=42).select(range(int(len(dataset["train"]) * subset_fraction)))
+
     print(f"Number of raw training samples: {len(train_data)}")
 
     # Preprocess data
@@ -114,5 +134,18 @@ if __name__ == "__main__":
 
     # Initialize and train CBOW model
     embedding_dim = 100
-    model = CBOWModel(vocab_size=len(vocab), embedding_dim=embedding_dim)
-    train_cbow_model(model, data_loader, num_epochs=5, learning_rate=0.01)
+    num_epochs = 50
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    print(f"Using device: {device}")
+    model = CBOWModel(vocab_size=len(vocab), embedding_dim=embedding_dim).to(device)
+    trained_model = train_cbow_model(model, data_loader, num_epochs, learning_rate=0.01, device=device)
+
+    # Compute similarity between words
+    embeddings = trained_model.embeddings.weight.detach().cpu().numpy()
+    try:
+        king_vec = embeddings[vocab["king"]]
+        queen_vec = embeddings[vocab["queen"]]
+        similarity = cosine_similarity(king_vec, queen_vec)
+        print(f"Similarity between 'king' and 'queen': {similarity:.4f}")
+    except KeyError as e:
+        print(f"Word not in vocabulary: {e}")

@@ -1,5 +1,4 @@
 import os
-from datasets import load_dataset
 from torch.utils.data import Dataset, DataLoader
 from torch.nn.utils.rnn import pad_sequence
 import torch
@@ -24,6 +23,9 @@ class Vocabulary:
 
     def decode(self, indices):
         return [self.idx_to_word.get(idx, "<unk>") for idx in indices]
+    
+    def __getitem__(self, word):
+        return self.word_to_idx.get(word, None)  # Returns None if the word is not in vocabulary
 
 
 class WikiTextDataset(Dataset):
