@@ -11,6 +11,8 @@ import matplotlib.pyplot as plt
 import spacy
 from sklearn.manifold import TSNE
 import matplotlib.pyplot as plt
+from nltk.tokenize import sent_tokenize
+import random
 
 # Ensure imports work correctly
 sys.path.append('../data')
@@ -27,11 +29,25 @@ def remove_stopwords(text):
     filtered_words = [token.text for token in doc if not token.is_stop]
     return " ".join(filtered_words)
 
-def preprocess(text):
-    """Custom preprocessing to clean text."""
-    doc = nlp(text)
-    sentences = [sent.text.lower() for sent in doc.sents]
-    return sentences
+
+
+def preprocess_with_nltk(text):
+    sentences = sent_tokenize(text)
+    result = [remove_stopwords(sent) for sent in sentences]
+    return result
+
+def set_seed(seed):
+    """Set the random seed for reproducibility."""
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed(seed)
+        torch.cuda.manual_seed_all(seed)
+    # Ensure deterministic behavior for some operations
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
+
 
 class CBOWModel(nn.Module):
     def __init__(self, vocab_size, embedding_dim):
@@ -122,11 +138,24 @@ def train_cbow_model(model, data_loader, num_epochs, learning_rate=0.01, device=
 
     return model
 
+def visualize_embeddings(embeddings, vocab, title, filename, num_words=50):
+    """Visualize embeddings using TSNE."""
+    reduced_embeddings = TSNE(n_components=2).fit_transform(embeddings[:num_words])
+    words = [vocab.idx_to_word[i] for i in range(num_words)]
+
+    plt.figure(figsize=(10, 10))
+    for i, word in enumerate(words):
+        plt.scatter(reduced_embeddings[i, 0], reduced_embeddings[i, 1])
+        plt.text(reduced_embeddings[i, 0], reduced_embeddings[i, 1], word, fontsize=8)
+    plt.title(title)
+    plt.savefig(filename)
+    plt.close()
 
 
 if __name__ == "__main__":
+    SEED = 42
+    set_seed(SEED)
     # Load the dataset from the file
-    #file_path = "../data/sample_corpus.txt"
     file_path = "../data/train.txt"
     print(f"Loading data from: {file_path}")
     with open(file_path, "r") as file:
@@ -139,14 +168,13 @@ if __name__ == "__main__":
     for line in tqdm(raw_data, desc="Preprocessing data"):
         if line.strip():
             # Process each line into sentences, remove stopwords from each sentence
-            sentences = preprocess(line.strip())
+            sentences = preprocess_with_nltk(line.lower())
             cleaned_sentences = [remove_stopwords(sentence) for sentence in sentences]
             preprocessed_data.extend(cleaned_sentences)
 
     print(f"Number of non-empty training samples: {len(preprocessed_data)}")
-    print(f"Sample preprocessed data: {preprocessed_data[:3]}")
-    print(f"Number of non-empty training samples: {len(preprocessed_data)}")
-    print(f"Sample preprocessed data: {preprocessed_data[:3]}")
+    print(f"Sample preprocessed data: {preprocessed_data[:10]}")
+
 
     # Build vocabulary
     vocab = Vocabulary()
@@ -159,7 +187,7 @@ if __name__ == "__main__":
     tokenized_data = [vocab.encode(sentence) for sentence in tqdm(preprocessed_data, desc="Tokenizing data")]
 
     # Generate CBOW data
-    window_size = 2
+    window_size = 3
     min_length = 2 * window_size + 1
     tokenized_data = [tokens for tokens in tokenized_data if len(tokens) >= min_length]
     print(f"Number of sentences after filtering short ones: {len(tokenized_data)}")
@@ -172,10 +200,17 @@ if __name__ == "__main__":
 
     # Initialize and train CBOW model
     embedding_dim = 100
-    num_epochs = 20
+    num_epochs = 35
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Using device: {device}")
     model = CBOWModel(vocab_size=len(vocab), embedding_dim=embedding_dim).to(device)
+    visualize_embeddings(
+        model.embeddings.weight.detach().cpu().numpy(),
+        vocab,
+        "Embeddings Before Training",
+        f"loss_plots/initial_embeddings{num_epochs}.png"
+    )
+
     trained_model = train_cbow_model(model, data_loader, num_epochs, learning_rate=0.001, device=device)
 
     # Compute similarity between words
@@ -202,15 +237,66 @@ if __name__ == "__main__":
         player_vec = np.squeeze(embeddings[vocab.encode("player")])
         similarity = cosine_similarity(team_vec, player_vec)
         print(f"Similarity between 'team' and 'player': {similarity:.4f}")
-        embeddings = trained_model.embeddings.weight.detach().cpu().numpy()
-        reduced_embeddings = TSNE(n_components=2).fit_transform(embeddings[:500])
-        words = [vocab.idx_to_word[i] for i in range(500)]
+        # Example 1: Capital and Country
+        paris_vec = embeddings[vocab["paris"]]
+        france_vec = embeddings[vocab["france"]]
+        italy_vec = embeddings[vocab["italy"]]
 
-        plt.figure(figsize=(10, 10))
-        for i, word in enumerate(words):
-            plt.scatter(reduced_embeddings[i, 0], reduced_embeddings[i, 1])
-            plt.text(reduced_embeddings[i, 0], reduced_embeddings[i, 1], word)
-        plt.savefig(f"loss_plots/embeddings{num_epochs}.png")
-        plt.close()
+        analogy_vec = paris_vec - france_vec + italy_vec
+        similarities = np.dot(embeddings, analogy_vec) / (
+            np.linalg.norm(embeddings, axis=1) * np.linalg.norm(analogy_vec)
+        )
+        most_similar_idx = similarities.argsort()[-2]  # Exclude "italy"
+        most_similar_word = vocab.idx_to_word[most_similar_idx]
+        print(f"paris - france + italy = {most_similar_word}")
+
+        # Example 2: Plural Forms
+        king_vec = embeddings[vocab["king"]]
+        kings_vec = embeddings[vocab["kings"]]
+        queen_vec = embeddings[vocab["queen"]]
+
+        analogy_vec = king_vec - kings_vec + queen_vec
+        similarities = np.dot(embeddings, analogy_vec) / (
+            np.linalg.norm(embeddings, axis=1) * np.linalg.norm(analogy_vec)
+        )
+        most_similar_idx = similarities.argsort()[-2]  # Exclude "queen"
+        most_similar_word = vocab.idx_to_word[most_similar_idx]
+        print(f"king - kings + queen = {most_similar_word}")
+        # Similarity between professions
+        doctor_vec = embeddings[vocab["doctor"]]
+        nurse_vec = embeddings[vocab["nurse"]]
+
+        similarity = cosine_similarity(doctor_vec, nurse_vec)
+        print(f"Similarity between 'doctor' and 'nurse': {similarity:.4f}")
+
+        # Similarity between objects
+        car_vec = embeddings[vocab["car"]]
+        truck_vec = embeddings[vocab["truck"]]
+
+        similarity = cosine_similarity(car_vec, truck_vec)
+        print(f"Similarity between 'car' and 'truck': {similarity:.4f}")
+        # Similarity between emotions
+        happy_vec = embeddings[vocab["happy"]]
+        joyful_vec = embeddings[vocab["joyful"]]
+
+        similarity = cosine_similarity(happy_vec, joyful_vec)
+        print(f"Similarity between 'happy' and 'joyful': {similarity:.4f}")
+
+        # Similarity between opposites
+        hot_vec = embeddings[vocab["hot"]]
+        cold_vec = embeddings[vocab["cold"]]
+
+        similarity = cosine_similarity(hot_vec, cold_vec)
+        print(f"Similarity between 'hot' and 'cold': {similarity:.4f}")
+
+
+
+
     except KeyError as e:
         print(f"Word not in vocabulary: {e}")
+    visualize_embeddings(
+            trained_model.embeddings.weight.detach().cpu().numpy(),
+            vocab,
+            "Embeddings After Training",
+            f"loss_plots/trained_embeddings{num_epochs}.png"
+    )
