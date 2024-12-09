@@ -150,60 +150,113 @@ def visualize_embeddings(embeddings, vocab, title, filename, num_words=50):
     plt.title(title)
     plt.savefig(filename)
     plt.close()
-
-
-if __name__ == "__main__":
-    SEED = 42
-    set_seed(SEED)
-    # Load the dataset from the file
-    file_path = "../data/train.txt"
+def load_data(file_path):
+    """Load raw data from a file."""
     print(f"Loading data from: {file_path}")
     with open(file_path, "r") as file:
         raw_data = file.readlines()
-
     print(f"Number of raw training samples: {len(raw_data)}")
+    return raw_data
 
-    # Preprocess data with stopwords removal
+
+def preprocess_data(raw_data):
+    """Preprocess raw data by tokenizing sentences and removing stopwords."""
     preprocessed_data = []
     for line in tqdm(raw_data, desc="Preprocessing data"):
         if line.strip():
-            # Process each line into sentences, remove stopwords from each sentence
             sentences = preprocess_with_nltk(line.lower())
             cleaned_sentences = [remove_stopwords(sentence) for sentence in sentences]
             preprocessed_data.extend(cleaned_sentences)
-
     print(f"Number of non-empty training samples: {len(preprocessed_data)}")
     print(f"Sample preprocessed data: {preprocessed_data[:10]}")
+    return preprocessed_data
 
 
-    # Build vocabulary
+def build_vocabulary(preprocessed_data):
+    """Build vocabulary from preprocessed data."""
     vocab = Vocabulary()
     for sentence in tqdm(preprocessed_data, desc="Building Vocabulary"):
         for word in sentence.split():
             vocab.add_word(word)
     print(f"Vocabulary size after stopwords removal: {len(vocab)}")
+    return vocab
 
-    # Tokenize data
+
+def tokenize_data(preprocessed_data, vocab):
+    """Tokenize preprocessed data using the vocabulary."""
     tokenized_data = [vocab.encode(sentence) for sentence in tqdm(preprocessed_data, desc="Tokenizing data")]
+    return tokenized_data
 
-    # Generate CBOW data
-    window_size = 3
+
+def filter_short_sentences(tokenized_data, window_size):
+    """Filter sentences shorter than the required minimum length."""
     min_length = 2 * window_size + 1
-    tokenized_data = [tokens for tokens in tokenized_data if len(tokens) >= min_length]
-    print(f"Number of sentences after filtering short ones: {len(tokenized_data)}")
+    filtered_data = [tokens for tokens in tokenized_data if len(tokens) >= min_length]
+    print(f"Number of sentences after filtering short ones: {len(filtered_data)}")
+    return filtered_data
 
-    cbow_data = generate_cbow_data(tokenized_data, window_size)
 
-    # Prepare DataLoader
+def compute_similarity(embeddings, vocab, word_pairs):
+    """Compute cosine similarity for given word pairs."""
+    for word1, word2 in word_pairs:
+        try:
+            vec1 = embeddings[vocab[word1]]
+            vec2 = embeddings[vocab[word2]]
+            similarity = cosine_similarity(vec1, vec2)
+            print(f"Similarity between '{word1}' and '{word2}': {similarity:.4f}")
+        except KeyError as e:
+            print(f"Word not in vocabulary: {e}")
+
+
+def perform_analogies(embeddings, vocab, analogy_tasks):
+    """Perform analogy tasks and print results."""
+    for (word1, word2, word3) in analogy_tasks:
+        try:
+            vec1 = embeddings[vocab[word1]]
+            vec2 = embeddings[vocab[word2]]
+            vec3 = embeddings[vocab[word3]]
+            analogy_vec = vec1 - vec2 + vec3
+            similarities = np.dot(embeddings, analogy_vec) / (
+                np.linalg.norm(embeddings, axis=1) * np.linalg.norm(analogy_vec)
+            )
+            most_similar_idx = similarities.argsort()[-2]  # Exclude last input word
+            most_similar_word = vocab.idx_to_word[most_similar_idx]
+            print(f"{word1} - {word2} + {word3} = {most_similar_word}")
+        except KeyError as e:
+            print(f"Word not in vocabulary: {e}")
+
+
+def main():
+    SEED = 42
+    set_seed(SEED)
+
+    # File path
+    file_path = "../data/train.txt"
+    raw_data = load_data(file_path)
+
+    # Preprocessing
+    preprocessed_data = preprocess_data(raw_data)
+
+    # Vocabulary and tokenization
+    vocab = build_vocabulary(preprocessed_data)
+    tokenized_data = tokenize_data(preprocessed_data, vocab)
+
+    # Generate training data
+    window_size = 3
+    filtered_data = filter_short_sentences(tokenized_data, window_size)
+    cbow_data = generate_cbow_data(filtered_data, window_size)
+
+    # DataLoader
     batch_size = 64
     data_loader = prepare_dataloader(cbow_data, batch_size)
 
     # Initialize and train CBOW model
     embedding_dim = 100
-    num_epochs = 35
+    num_epochs = 40
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Using device: {device}")
     model = CBOWModel(vocab_size=len(vocab), embedding_dim=embedding_dim).to(device)
+
     visualize_embeddings(
         model.embeddings.weight.detach().cpu().numpy(),
         vocab,
@@ -213,90 +266,32 @@ if __name__ == "__main__":
 
     trained_model = train_cbow_model(model, data_loader, num_epochs, learning_rate=0.001, device=device)
 
-    # Compute similarity between words
-    embeddings = trained_model.embeddings.weight.detach().cpu().numpy()
-    try:
-        king_vec = embeddings[vocab["king"]]
-        man_vec = embeddings[vocab["man"]]
-        woman_vec = embeddings[vocab["woman"]]
-
-        # Compute the analogy vector
-        analogy_vec = king_vec - man_vec + woman_vec
-
-        # Compute cosine similarity between analogy vector and all words in the vocabulary
-        similarities = np.dot(embeddings, analogy_vec) / (
-            np.linalg.norm(embeddings, axis=1) * np.linalg.norm(analogy_vec)
-        )
-
-        # Find the most similar word (excluding the input words)
-        most_similar_idx = similarities.argsort()[-2]  # -2 to avoid "woman" being top
-        most_similar_word = vocab.idx_to_word[most_similar_idx]
-
-        print(f"king - man + woman = {most_similar_word}")
-        team_vec = np.squeeze(embeddings[vocab.encode("team")])
-        player_vec = np.squeeze(embeddings[vocab.encode("player")])
-        similarity = cosine_similarity(team_vec, player_vec)
-        print(f"Similarity between 'team' and 'player': {similarity:.4f}")
-        # Example 1: Capital and Country
-        paris_vec = embeddings[vocab["paris"]]
-        france_vec = embeddings[vocab["france"]]
-        italy_vec = embeddings[vocab["italy"]]
-
-        analogy_vec = paris_vec - france_vec + italy_vec
-        similarities = np.dot(embeddings, analogy_vec) / (
-            np.linalg.norm(embeddings, axis=1) * np.linalg.norm(analogy_vec)
-        )
-        most_similar_idx = similarities.argsort()[-2]  # Exclude "italy"
-        most_similar_word = vocab.idx_to_word[most_similar_idx]
-        print(f"paris - france + italy = {most_similar_word}")
-
-        # Example 2: Plural Forms
-        king_vec = embeddings[vocab["king"]]
-        kings_vec = embeddings[vocab["kings"]]
-        queen_vec = embeddings[vocab["queen"]]
-
-        analogy_vec = king_vec - kings_vec + queen_vec
-        similarities = np.dot(embeddings, analogy_vec) / (
-            np.linalg.norm(embeddings, axis=1) * np.linalg.norm(analogy_vec)
-        )
-        most_similar_idx = similarities.argsort()[-2]  # Exclude "queen"
-        most_similar_word = vocab.idx_to_word[most_similar_idx]
-        print(f"king - kings + queen = {most_similar_word}")
-        # Similarity between professions
-        doctor_vec = embeddings[vocab["doctor"]]
-        nurse_vec = embeddings[vocab["nurse"]]
-
-        similarity = cosine_similarity(doctor_vec, nurse_vec)
-        print(f"Similarity between 'doctor' and 'nurse': {similarity:.4f}")
-
-        # Similarity between objects
-        car_vec = embeddings[vocab["car"]]
-        truck_vec = embeddings[vocab["truck"]]
-
-        similarity = cosine_similarity(car_vec, truck_vec)
-        print(f"Similarity between 'car' and 'truck': {similarity:.4f}")
-        # Similarity between emotions
-        happy_vec = embeddings[vocab["happy"]]
-        joyful_vec = embeddings[vocab["joyful"]]
-
-        similarity = cosine_similarity(happy_vec, joyful_vec)
-        print(f"Similarity between 'happy' and 'joyful': {similarity:.4f}")
-
-        # Similarity between opposites
-        hot_vec = embeddings[vocab["hot"]]
-        cold_vec = embeddings[vocab["cold"]]
-
-        similarity = cosine_similarity(hot_vec, cold_vec)
-        print(f"Similarity between 'hot' and 'cold': {similarity:.4f}")
-
-
-
-
-    except KeyError as e:
-        print(f"Word not in vocabulary: {e}")
+    # Visualize embeddings after training
     visualize_embeddings(
-            trained_model.embeddings.weight.detach().cpu().numpy(),
-            vocab,
-            "Embeddings After Training",
-            f"loss_plots/trained_embeddings{num_epochs}.png"
+        trained_model.embeddings.weight.detach().cpu().numpy(),
+        vocab,
+        "Embeddings After Training",
+        f"loss_plots/trained_embeddings{num_epochs}.png"
     )
+
+    # Word similarity tasks
+    word_pairs = [
+        ("team", "player"),
+        ("doctor", "nurse"),
+        ("car", "truck"),
+        ("happy", "joyful"),
+        ("hot", "cold")
+    ]
+    compute_similarity(trained_model.embeddings.weight.detach().cpu().numpy(), vocab, word_pairs)
+
+    # Analogy tasks
+    analogy_tasks = [
+        ("king", "man", "woman"),
+        ("paris", "france", "italy"),
+        ("king", "kings", "queen")
+    ]
+    perform_analogies(trained_model.embeddings.weight.detach().cpu().numpy(), vocab, analogy_tasks)
+
+
+if __name__ == "__main__":
+    main()
