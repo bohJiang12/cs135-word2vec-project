@@ -13,7 +13,7 @@ from sklearn.manifold import TSNE
 import matplotlib.pyplot as plt
 from nltk.tokenize import sent_tokenize
 import random
-from cbow import visualize_embeddings, remove_stopwords, preprocess_with_nltk, set_seed
+from cbow import *
 
 # Ensure imports work correctly
 sys.path.append('../data')
@@ -110,53 +110,30 @@ def train_skipgram_model(model, data_loader, num_epochs, learning_rate=0.01, dev
 if __name__ == "__main__":
     SEED = 42
     set_seed(SEED)
-    # Load the dataset from the file
+     # File path
     file_path = "../data/train.txt"
-    print(f"Loading data from: {file_path}")
-    with open(file_path, "r") as file:
-        raw_data = file.readlines()
+    raw_data = load_data(file_path)
 
-    print(f"Number of raw training samples: {len(raw_data)}")
+    # Preprocessing
+    preprocessed_data = preprocess_data(raw_data)
 
-    # Preprocess data with stopwords removal
-    preprocessed_data = []
-    for line in tqdm(raw_data, desc="Preprocessing data"):
-        if line.strip():
-            # Process each line into sentences, remove stopwords from each sentence
-            sentences = preprocess_with_nltk(line.lower())
-            cleaned_sentences = [remove_stopwords(sentence) for sentence in sentences]
-            preprocessed_data.extend(cleaned_sentences)
+    # Vocabulary and tokenization
+    vocab = build_vocabulary(preprocessed_data)
+    tokenized_data = tokenize_data(preprocessed_data, vocab)
 
-    print(f"Number of non-empty training samples: {len(preprocessed_data)}")
-    print(f"Sample preprocessed data: {preprocessed_data[:10]}")
-
-
-    # Build vocabulary
-    vocab = Vocabulary()
-    for sentence in tqdm(preprocessed_data, desc="Building Vocabulary"):
-        for word in sentence.split():
-            vocab.add_word(word)
-    print(f"Vocabulary size after stopwords removal: {len(vocab)}")
-
-    # Tokenize data
-    tokenized_data = [vocab.encode(sentence) for sentence in tqdm(preprocessed_data, desc="Tokenizing data")]
-
-    # Generate CBOW data
+    # Generate training data
     window_size = 3
-    min_length = 2 * window_size + 1
-    tokenized_data = [tokens for tokens in tokenized_data if len(tokens) >= min_length]
-    print(f"Number of sentences after filtering short ones: {len(tokenized_data)}")
+    filtered_data = filter_short_sentences(tokenized_data, window_size)
+    skipgram_data = generate_skipgram_data(filtered_data, window_size)
 
-    # Generate Skip-Gram data
-    skipgram_data = generate_skipgram_data(tokenized_data, window_size)
-
-    # Prepare DataLoader
+    # DataLoader
     batch_size = 64
     data_loader = prepare_dataloader(skipgram_data, batch_size)
+   
 
     # Initialize and train Skip-Gram model
     embedding_dim = 100
-    num_epochs = 35
+    num_epochs = 25
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Using device: {device}")
     model = SkipGramModel(vocab_size=len(vocab), embedding_dim=embedding_dim).to(device)
@@ -177,3 +154,22 @@ if __name__ == "__main__":
         "Embeddings After Training",
         f"loss_plots/skipgram_trained_embeddings{num_epochs}.png"
     )
+
+    # Word similarity tasks
+    word_pairs = [
+        ("team", "player"),
+        ("doctor", "nurse"),
+        ("car", "truck"),
+        ("happy", "joyful"),
+        ("hot", "cold")
+    ]
+    compute_similarity(trained_model.embeddings.weight.detach().cpu().numpy(), vocab, word_pairs)
+
+    # Analogy tasks
+    analogy_tasks = [
+        ("king", "man", "woman"),
+        ("paris", "france", "italy"),
+        ("king", "kings", "queen")
+    ]
+    perform_analogies(trained_model.embeddings.weight.detach().cpu().numpy(), vocab, analogy_tasks)
+
