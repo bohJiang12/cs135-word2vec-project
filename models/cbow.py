@@ -8,14 +8,10 @@ import torch.optim as optim
 from torch.utils.data import DataLoader, Dataset
 from tqdm import tqdm
 import matplotlib.pyplot as plt
-from datasets import load_dataset
 
 # Ensure imports work correctly
 sys.path.append('../data')
 from download_and_preprocess import preprocess, Vocabulary
-
-# Set Hugging Face cache directory
-os.environ["HF_DATASETS_CACHE"] = "/home/egk265/huggingface"
 
 
 class CBOWModel(nn.Module):
@@ -108,16 +104,17 @@ def train_cbow_model(model, data_loader, num_epochs, learning_rate=0.01, device=
 
 
 if __name__ == "__main__":
-    # Load the dataset
-    dataset = load_dataset("wikitext", "wikitext-103-v1", cache_dir="/home/egk265/huggingface")
-    subset_fraction = 0.01  # Use a subset of the dataset for testing
-    train_data = dataset["train"].shuffle(seed=42).select(range(int(len(dataset["train"]) * subset_fraction)))
+    # Load the dataset from the file
+    file_path = "../data/train.txt"
+    print(f"Loading data from: {file_path}")
+    with open(file_path, "r") as file:
+        raw_data = file.readlines()
 
-    print(f"Number of raw training samples: {len(train_data)}")
+    print(f"Number of raw training samples: {len(raw_data)}")
 
     # Preprocess data
     preprocessed_data = [
-        preprocess(item["text"]) for item in tqdm(train_data, desc="Preprocessing data") if item["text"].strip()
+        preprocess(line.strip()) for line in tqdm(raw_data, desc="Preprocessing data") if line.strip()
     ]
 
     # Build vocabulary
@@ -131,20 +128,20 @@ if __name__ == "__main__":
     tokenized_data = [vocab.encode(sentence) for sentence in tqdm(preprocessed_data, desc="Tokenizing data")]
 
     # Generate CBOW data
-    window_size = 5
+    window_size = 10
     cbow_data = generate_cbow_data(tokenized_data, window_size)
 
     # Prepare DataLoader
-    batch_size = 32
+    batch_size = 64
     data_loader = prepare_dataloader(cbow_data, batch_size)
 
     # Initialize and train CBOW model
-    embedding_dim = 100
-    num_epochs = 5
+    embedding_dim = 300
+    num_epochs = 25
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Using device: {device}")
     model = CBOWModel(vocab_size=len(vocab), embedding_dim=embedding_dim).to(device)
-    trained_model = train_cbow_model(model, data_loader, num_epochs, learning_rate=0.01, device=device)
+    trained_model = train_cbow_model(model, data_loader, num_epochs, learning_rate=0.001, device=device)
 
     # Compute similarity between words
     embeddings = trained_model.embeddings.weight.detach().cpu().numpy()
@@ -153,5 +150,9 @@ if __name__ == "__main__":
         queen_vec = embeddings[vocab["queen"]]
         similarity = cosine_similarity(king_vec, queen_vec)
         print(f"Similarity between 'king' and 'queen': {similarity:.4f}")
+        team_vec = embeddings[vocab["team"]]
+        player_vec = embeddings[vocab["player"]]
+        similarity = cosine_similarity(team_vec, player_vec)
+        print(f"Similarity between 'team' and 'player': {similarity:.4f}")
     except KeyError as e:
         print(f"Word not in vocabulary: {e}")
