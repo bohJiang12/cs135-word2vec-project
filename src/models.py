@@ -31,7 +31,6 @@ class CBOW(nn.Module):
 
         return logits, labels
 
-        # return pos_score, neg_score
 
 
 class SG(nn.Module):
@@ -56,8 +55,6 @@ class SG(nn.Module):
             torch.ones(pos_score.shape[0], 1), 
             torch.zeros(pos_score.shape[0], neg_score.shape[1]) 
         ], dim=1)
-        # labels = torch.zeros_like(logits, dtype=torch.float32)
-        # labels[:, 0] = 1
 
         return logits, labels
      

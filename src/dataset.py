@@ -45,7 +45,6 @@ class CBOWDataset(Dataset):
     def __init__(self,
                  corpus_file: Union[str, Path],
                  win_size: int):
-        # self.data, self.vocab, self.neg_samples = self.build_data(corpus_file, win_size)
         self.data, self.vocab, self.dist = self.build_data(corpus_file, win_size)
         
     def __len__(self) -> int:
@@ -61,7 +60,7 @@ class CBOWDataset(Dataset):
         )
         target_index = torch.tensor(self.vocab.get(target, self.vocab[OOV]), dtype=torch.long)
     
-        return contexts_indices, target_index #, self.neg_samples
+        return contexts_indices, target_index 
 
     def build_data(self,
                    corpus_file: Union[str, Path],
@@ -96,9 +95,8 @@ class CBOWDataset(Dataset):
         vocab.update({OOV: len(vocab)})
         
         word_dist = get_dist(corpus.words_count, vocab)
-        # neg_samples = neg_sampling(self.num_neg_samples, corpus.words_count, vocab)
         
-        return pairs, vocab, word_dist #, neg_samples        
+        return pairs, vocab, word_dist  
 
 
 class SGDataset(CBOWDataset):

@@ -102,26 +102,13 @@ class Run:
             self.train_sg()
     
     def train_cbow(self):
-        # Start training in epochs
-        prev_loss = 0.0
-        round_count = 0
-        tol, rounds = self.params['tol'], self.params['rounds']
         for epoch in range(self.params['epochs']):
             total_loss = 0.0
             with tqdm(total=len(self.dataloader), desc=f"Epoch {epoch+1}/{self.params['epochs']}", unit="batch") as pbar:
                 for contexts, target, neg_samples in self.dataloader:
                     contexts, target, neg_samples = contexts.to(self.device), target.to(self.device), neg_samples.to(self.device)
                     
-                    # context_size = contexts.size(0)
-                    # pos_labels = torch.ones(context_size).to(self.device)
-                    # neg_labels = torch.zeros(context_size, self.params['n_neg_sps']).to(self.device)
-                    
                     self.optimizer.zero_grad()
-                    
-                    # pos_score, neg_score = self.model(contexts, target, neg_samples)
-                    # pos_loss = self.loss_fn(pos_score, pos_labels)
-                    # neg_loss = self.loss_fn(neg_score, neg_labels)
-                    # loss = pos_loss + neg_loss
                     
                     logits, labels = self.model(contexts, target, neg_samples)
                     loss = self.loss_fn(logits.to(self.device), labels.to(self.device))
@@ -135,15 +122,6 @@ class Run:
                     pbar.update(1)
             print(f"Epoch {epoch + 1}/{self.params['epochs']} | Loss: {total_loss:.4f}")
             
-            # # Early stop
-            # if round_count == rounds:
-            #     print('Early stopped!')
-            #     break
-            # if total_loss < prev_loss:
-            #     if (prev_loss - total_loss) / prev_loss < tol:
-            #         round_count += 1
-            # else:
-            #     round_count += 1
     def train_sg(self):
         for epoch in range(self.params['epochs']):
             total_loss = 0.0
