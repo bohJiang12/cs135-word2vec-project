@@ -1,0 +1,22 @@
+model: sg
+
+corpus: train.txt
+data_dir: data
+
+batch_size: 512
+
+win_size: 4
+embed_dim: 100
+n_neg_sps: 3
+
+device: cuda
+optimizer: Adam
+lr: 0.003
+epochs: 5
+tol: 0.05
+rounds: 3
+
+
+out_dir: weights/
+
+

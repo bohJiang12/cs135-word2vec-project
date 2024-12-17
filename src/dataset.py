@@ -9,80 +9,150 @@ from collections import Counter
 import torch
 from torch.utils.data import Dataset
 
+import numpy as np
+
 # from nltk.corpus import stopwords
 #STOP_WORDS = set(stopwords.words('english'))
 
 OOV = '<oov>'  # special token for out-of-vocabulary word
+PAD = '<pad>'  # special token for padding 
+
+def get_dist(word_freq: Union[Dict, Counter], vocab: Dict[str, int]) -> torch.LongTensor:
+    word_dist = np.array(
+        [word_freq[w] ** 0.75 for w in vocab]
+    )
+    word_dist /= word_dist.sum()
+    return word_dist
+
 
 class Corpus:
     """Corpus class for collecting words from a raw corpus"""
-    def __init__(self, fpath: Union[str, Path]):
-        self.fpath = fpath
+    def __init__(self):
         self.words_count = Counter()
-        self.sentences = self._load_corpus()
 
-    def _load_corpus(self) -> Iterator[List[str]]:
+    def load_from(self, fpath: Union[str, Path]) -> Iterator[List[str]]:
         """Yield every sentence in the corpus and count each word"""
-        with open(self.fpath, encoding='utf-8') as f:
+        with open(fpath, encoding='utf-8') as f:
             for line in f:
                 line = line.strip()
-                if not line and line != '"' and not line.startswith('='):
+                if line and line != '"' and not line.startswith('='):
                     sentence = line.lower().split()
                     self.words_count.update(sentence)
                     yield sentence
 
-class Data(Dataset, ABC):
-    """Abstract dataset"""
-    def __init__(self, corpus: Corpus, num_neg_samples: int):
-        self.vocab = {w: i for i, w in enumerate(corpus.words_count)}
-        self.vocab.update({OOV: len(self.vocab)})
-        self.neg_samples = self._neg_sampling(corpus.words_count, num_neg_samples)
-        self.data = None
-
+class CBOWDataset(Dataset):
+    """CBOW dataset"""
+    def __init__(self,
+                 corpus_file: Union[str, Path],
+                 win_size: int):
+        # self.data, self.vocab, self.neg_samples = self.build_data(corpus_file, win_size)
+        self.data, self.vocab, self.dist = self.build_data(corpus_file, win_size)
+        
     def __len__(self) -> int:
-        assert self.data is not None
+        assert self.data 
         return len(self.data)
 
     def __getitem__(self, index):
-        assert self.data is not None
+        assert self.data 
         contexts, target = self.data[index]
-        return torch.tensor(contexts, dtype=torch.long), torch.tensor(target, dtype=torch.long), self.neg_samples
-
-    def _neg_sampling(self, word_freq: Counter[str, int], n: int) -> torch.LongTensor:
-        word_dist = torch.tensor(
-            [word_freq[i] ** 0.75 for i in range(self.vocab)]
+        contexts_indices = torch.tensor(
+            [self.vocab.get(c, self.vocab[OOV]) for c in contexts],
+            dtype=torch.long
         )
-        word_dist /= word_dist.sum()
-        return torch.multinomial(word_dist, n, replacement=True)
+        target_index = torch.tensor(self.vocab.get(target, self.vocab[OOV]), dtype=torch.long)
+    
+        return contexts_indices, target_index #, self.neg_samples
 
-    @abstractmethod
-    def build_data(self):
-        pass
-
-class CBOWDataset(Data):
-    """CBOW dataset"""
-    def __init__(self, corpus: Corpus, num_neg_samples: int, win_size: int):
-        super().__init__(corpus, num_neg_samples)
-        self.data = self.build_data(corpus.sentences, win_size)
-
-    def build_data(self, corpus: Iterator[List[str]], win_size: int) -> List[Tuple[List[int], int]]:
+    def build_data(self,
+                   corpus_file: Union[str, Path],
+                   win_size: int
+                   ) -> Tuple[
+                       Tuple[List[str], str],
+                       Dict[str, int],
+                       torch.LongTensor
+                   ]:
+        """
+        Build pairs (contexual words, target) from given corpus file;
+        Build vocabulary and pick negative samples from yielded word counter
+        """
+        # load corpus from file
+        corpus = Corpus()
+        sentences = corpus.load_from(corpus_file)
+        
+        # build pairs: (contexts, target)
         pairs = []
-        for sentence in corpus:
-            for i, token in enumerate(sentence):
+        for sentence in sentences:
+            for i, target in enumerate(sentence):
                 start = max(0, i - win_size)
-                end = min (i + win_size + 1, len(sentence))
-                contexts = [self.vocab.get(w, self.vocab[OOV]) for w in sentence[start:i] + sentence[i+1:end]]
-                target = self.vocab.get(token, self.vocab[OOV])
+                end = min(i + win_size + 1, len(sentence))
+                contexts = sentence[start:i] + sentence[i+1:end]
+                if len(contexts) < 2 * win_size:
+                    contexts += (2*win_size - len(contexts)) * [PAD]
                 pairs.append((contexts, target))
-        return pairs
+        
+        # build vocab and negative samples based on words frequence
+        vocab = {w: i+1 for i, w in enumerate(corpus.words_count)}
+        vocab[PAD] = 0
+        vocab.update({OOV: len(vocab)})
+        
+        word_dist = get_dist(corpus.words_count, vocab)
+        # neg_samples = neg_sampling(self.num_neg_samples, corpus.words_count, vocab)
+        
+        return pairs, vocab, word_dist #, neg_samples        
 
-class SGDataset(Data):
+
+class SGDataset(CBOWDataset):
     """Skip-gram dataset"""
-    def __init__(self, corpus: Corpus, num_neg_samples: int, win_size: int):
-        super().__init__(corpus, num_neg_samples)
+    def __init__(self,
+                 corpus_file: Union[str, Path],
+                 win_size: int):
+        self.data, self.vocab, self.dist = self.build_data(corpus_file, win_size)
+        
+    def __len__(self) -> int:
+        assert self.data 
+        return len(self.data)
 
-    def build_data(self, corpus: Iterator[List[str]], win_size: int) -> List[Tuple[List[int], int]]:
-        ...
+    def __getitem__(self, index):
+        assert self.data 
+        target, context = self.data[index]
+        context_idx = torch.tensor(self.vocab.get(context, self.vocab[OOV]), dtype=torch.long)
+        target_index = torch.tensor(self.vocab.get(target, self.vocab[OOV]), dtype=torch.long)
+    
+        return target_index, context_idx
+
+    def build_data(self,
+                   corpus_file: Union[str, Path],
+                   win_size: int
+                   ) -> Tuple[
+                       List[Tuple[str, str]],
+                       Dict[str, int],
+                       torch.LongTensor
+                   ]:
+        """
+        Build pairs (contexual words, target) from given corpus file;
+        Build vocabulary and pick negative samples from yielded word counter
+        """
+        # load corpus from file
+        corpus = Corpus()
+        sentences = corpus.load_from(corpus_file)
+        
+        # build pairs: (target, context)
+        pairs = []
+        for sentence in sentences:
+            for i, target in enumerate(sentence):
+                start = max(0, i - win_size)
+                end = min(i + win_size + 1, len(sentence))
+                contexts = sentence[start:i] + sentence[i+1:end]
+                for context in contexts:
+                    pairs.append((target, context))
+        
+        # build vocab and negative samples based on words frequence
+        vocab = {w: i for i, w in enumerate(corpus.words_count)}
+        vocab.update({OOV: len(vocab)})
+        
+        word_dist = get_dist(corpus.words_count, vocab)
+        return pairs, vocab, word_dist
+            
 
 
 
