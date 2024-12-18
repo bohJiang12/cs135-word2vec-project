@@ -1,7 +1,7 @@
 """
 Visualize embeddings
 """
-from eval_utils import *
+from eval.eval_utils import *
 
 from typing import List
 
@@ -14,14 +14,15 @@ import numpy as np
 
 from umap import UMAP
 
-SIMLEX_DATA = '../data/SimLex-999/SimLex-999.txt'
-WORDSIM_DATA = '../data/wordsim353_sim_rel/wordsim_similarity_goldstandard.txt'
+SIMLEX_DATA = 'SimLex-999/SimLex-999.txt'
+WORDSIM_DATA = 'wordsim353_sim_rel/wordsim_similarity_goldstandard.txt'
 
 class Visualizer:
     """Word embedding visualizer using UMAP"""
     def __init__(self,
                  embed_file: str,
                  vocab_file: str,
+                 data_dir: str,
                  seed: int,
                  num_words: int,
                  dataset: int):
@@ -29,7 +30,7 @@ class Visualizer:
         Note:
         `dataset`: an indicator for choosing dataset - 0 for SimLex-999; 1 for wordsim-353
         """
-        self.model = embed_file.split('_')[0]
+        self.model = embed_file.split('/')[1].split('_')[0]
         self.embeddings = torch.load(embed_file, weights_only=True)
         self.vocab = torch.load(vocab_file, weights_only=True)
 
@@ -37,14 +38,15 @@ class Visualizer:
         self.seed = seed
         self.k = num_words
         self.dataset = dataset
+        self.data_dir = data_dir
 
 
     def _select_words(self) -> List[int]:
         """select top k most similar pairs of words as indices"""
         if self.dataset:
-            word_pairs = most_common_k(load_wordsim(WORDSIM_DATA), self.k)
+            word_pairs = most_common_k(load_wordsim(f"{self.data_dir}/{WORDSIM_DATA}"), self.k)
         else:
-            word_pairs = most_common_k(load_simlex(SIMLEX_DATA), self.k)
+            word_pairs = most_common_k(load_simlex(f"{self.data_dir}/{SIMLEX_DATA}"), self.k)
 
         words = []
         for pair in word_pairs:
@@ -102,7 +104,8 @@ class Visualizer:
 
         plt.tight_layout()
 
-        plt.savefig(f"{out_dir}/{self.model}_visual_embed.png", dpi=300, bbox_inches='tight')
+        dataset_map = {0: 'wordsim', 1: 'simlex'}
+        plt.savefig(f"{out_dir}/{self.model}_{dataset_map[self.dataset]}_scatter.png", dpi=300, bbox_inches='tight')
 
 
 

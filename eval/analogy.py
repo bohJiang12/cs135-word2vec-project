@@ -1,7 +1,7 @@
 """
 Run analogy test using Google analogy test dataset
 """
-from typing import List
+from typing import List, Tuple
 
 import torch
 import torch.nn.functional as F
@@ -17,7 +17,7 @@ class AnalogyTest:
                  embed_file: str,
                  vocab_file: str,
                  max_num_questions: int):
-        self.model = embed_file.split('_')[0]
+        self.model = embed_file.split('/')[1].split('_')[0]
         self.embeddings = torch.load(embed_file, weights_only=True).cpu()
         self.vocab = torch.load(vocab_file, weights_only=True)
         self.idx_to_word = {i: w for w, i in self.vocab.items()}
@@ -36,7 +36,7 @@ class AnalogyTest:
                             questions.append([self.vocab[w] for w in analogies])
         return questions
 
-    def predict(self, question: List[int]) -> bool:
+    def predict(self, question: List[int]) -> Tuple[bool, str]:
         """
         Predict function:
         v1, v2, u1, ? => v1 - v2 = u1 - ? => ? = u1 + v2 - v1
@@ -50,18 +50,30 @@ class AnalogyTest:
         cos_sims = F.cosine_similarity(self.embeddings, V_d.unsqueeze(0), dim=1)
         prediction = torch.argmax(cos_sims).item()
 
+        W_w1, W_w2, W_u1, W_ans = [self.idx_to_word[i] for i in question]
+        W_pred = self.idx_to_word[prediction]
+
         # display the wrong prediction
         if answer != prediction:
-            W_w1, W_w2, W_u1, W_ans = [self.idx_to_word[i] for i in question]
-            W_pred = self.idx_to_word[prediction]
-            print(f"{W_w1} : {W_w2} = {W_u1} : {W_pred} [ans: {W_ans}]")
-            return False
-        return True
+            res = f"F {W_w1} {W_w2} {W_u1} {W_pred} [{W_ans}]"
+            return False, res
+        res = f"T {W_w1} {W_w2} {W_u1} {W_pred} [{W_ans}]"
+        return True, res
 
-    def score(self):
+    def score(self, out_dir: str):
         """Score the embeddings on analogy test"""
-        results = [self.predict(q) for q in self.questions]
-        print(f"{'=' * 50}\nResult: {sum(results)}/{len(results)}")
+        test_results = []
+        with open(f"{out_dir}/{self.model}_analogy_test.txt", 'w', encoding='utf-8') as f:
+            header = f"T/F w1 w2 u1 pred ans \n{'-' * 35}\n"
+            f.write(header)
+            for q in self.questions:
+                correct, result = self.predict(q)
+                test_results.append(correct)
+                f.write(f"{result}\n")
+
+
+
+
 
 
 
